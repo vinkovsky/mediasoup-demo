@@ -41,6 +41,9 @@
 		"connect-terminal": "npx mediasoup-demo-server-connect-terminal"
 	},
 	"dependencies": {
+		"@opentelemetry/api": "^1.9.0",
+		"@orpc/contract": "^1.13.2",
+		"@orpc/server": "^1.13.2",
 		"@sitespeed.io/throttle": "^5.0.1",
 		"awaitqueue": "^3.3.0",
 		"body-parser": "^2.2.1",
