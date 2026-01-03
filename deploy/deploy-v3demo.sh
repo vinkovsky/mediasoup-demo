@@ -21,6 +21,14 @@ if [ "$1" == "" ] || [ "$1" == "web" ]; then
 	rm -rf ../server/public
 	mv dist ../server/public
 	cd ../
+
+	# Optional: also build the Next.js call app into /call/.
+	if [ -d "call-next" ]; then
+		cd call-next/
+		npm run build
+		npm run export:to-server
+		cd ../
+	fi
 fi
 
 if [ "$1" == "" ] || [ "$1" == "node" ]; then

@@ -1,6 +1,7 @@
 import express from 'express';
 import type * as expressTypes from 'express';
 import * as bodyParser from 'body-parser';
+import { RPCHandler } from '@orpc/server/fetch';
 
 import { Logger } from './Logger';
 import { EnhancedEventEmitter } from './enhancedEvents';
@@ -8,8 +9,10 @@ import type { Room } from './Room';
 import type { BroadcasterPeer } from './BroadcasterPeer';
 import { ServerError, ForbiddenError, PeerNotFound } from './errors';
 import type { RoomId } from './types';
+import { orpcRouter } from './orpc/router';
 
 const logger = new Logger('ApiServer');
+const orpcHandler = new RPCHandler(orpcRouter);
 
 export type ApiServerCreateOptions = {
 	httpOriginHeader: string;
@@ -91,6 +94,68 @@ export class ApiServer extends EnhancedEventEmitter<ApiServerEvents> {
 			}
 
 			next();
+		});
+
+		/**
+		 * oRPC handler.
+		 *
+		 * IMPORTANT:
+		 * - This must run *before* bodyParser.json() so oRPC can read the raw body.
+		 * - Do NOT mount it as `use('/orpc', ...)` because Express rewrites `req.url`
+		 *   for mounted sub-apps, which breaks route matching.
+		 */
+		this.#expressApp.use((req: ApiServerExpressRequest, res, next) => {
+			const originalUrl = req.originalUrl ?? req.url;
+
+			if (!originalUrl.startsWith('/orpc')) {
+				next();
+
+				return;
+			}
+
+			const url = new URL(originalUrl, this.#httpOriginHeader);
+
+			const headers = new Headers();
+
+			for (const [key, value] of Object.entries(req.headers)) {
+				if (value === undefined) {
+					continue;
+				}
+
+				headers.set(key, Array.isArray(value) ? value.join(',') : value);
+			}
+
+			const fetchRequest = new Request(url, {
+				method: req.method,
+				headers,
+				// Body is only allowed for non-GET/HEAD requests.
+				body:
+					req.method === 'GET' || req.method === 'HEAD'
+						? undefined
+						: (req as unknown as RequestInit['body']),
+				// Node.js requires this when using a stream body.
+				duplex: 'half',
+			} as RequestInit);
+
+			orpcHandler
+				.handle(fetchRequest)
+				.then(async result => {
+					if (!result.matched) {
+						next();
+
+						return;
+					}
+
+					res.status(result.response.status);
+					result.response.headers.forEach((value, key) => {
+						res.setHeader(key, value);
+					});
+
+					const body = new Uint8Array(await result.response.arrayBuffer());
+
+					res.end(body);
+				})
+				.catch(error => next(error));
 		});
 
 		this.#expressApp.use(bodyParser.json());
